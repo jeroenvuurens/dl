@@ -103,7 +103,6 @@ class TextData:
         self.sort = sort
         self.repeat = repeat
         self.shuffle = shuffle
-        self.inverse_transform_y = lambda y : y
 
     def set_fields(self, fields):
         self.fields = fields

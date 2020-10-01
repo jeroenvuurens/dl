@@ -14,9 +14,6 @@ def single_layer_perceptron(input, output):
             pred_y = torch.sigmoid(x)
             return pred_y.view(-1)
 
-        def predict(self, y):
-            return torch.round(y)
-
     return SingleLayerPerceptron()
 
 identity=lambda x:x
@@ -46,21 +43,16 @@ def multi_layer_perceptron(*width, preprocess=identity, inner_activation=torch.r
                 elif last_activation != None:
                     self.actions.append(last_activation)
                     self.__setattr__(f'activation{n+1}', self.actions[-1])
-            self.last_activation = last_activation
             if width[-1] == 1:
                 self.reshape = (-1)
             else:
                 self.reshape = (-1, width[-1])
 
+
         def forward(self, x):
             for a in self.actions:
                 x = a(x)
             return x.view(self.reshape)
-
-        def predict(self, y):
-            if self.last_activation == torch.sigmoid:
-                return torch.round(y)
-            return y
 
     return MultiLayerPerceptron()
 
@@ -76,9 +68,6 @@ def two_layer_perceptron(input, hidden, output, a1=torch.relu):
             x = a1(self.w1(x))
             pred_y = torch.sigmoid(self.w2(x))
             return pred_y.view(-1)
-
-        def predict(self, y):
-            return torch.round(y)
 
     return TwoLayerPerceptron()
 

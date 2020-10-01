@@ -90,14 +90,6 @@ class rmse(train_metrics):
     def value(epoch):
         return math.sqrt(epoch['sse'] / epoch['n'])
 
-class rmspe(train_metrics):
-    def requirements(self):
-        self.history.require_module(store_sspe)
-
-    @staticmethod
-    def value(epoch):
-        return math.sqrt(epoch['sspe'] / epoch['sspen'])
-
 class r2(train_metrics):
     def requirements(self):
         self.history.require_module(store_r2)

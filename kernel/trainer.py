@@ -63,7 +63,7 @@ class ordered_dl:
             return False
 
 class trainer:
-    def __init__(self, model, data, report_frequency=1, report_phases=['train','valid'], metrics = [loss, acc], modules=[], optimizer=Adam, loss=binary_cross_entropy, out_features=None, random_state=None, log=True, cycle_epochs=1.0, gpu=GPU, device=None, predict=None, **kwargs):
+    def __init__(self, model, data, report_frequency=1, report_phases=['train','valid'], metrics = [loss, acc], modules=[], optimizer=Adam, loss=cross_entropy_loss, out_features=None, random_state=None, log=True, cycle_epochs=1.0, gpu=GPU, device=None, **kwargs):
         self.report_frequency = report_frequency
         self.report_phases = report_phases
         self.metrics = metrics
@@ -75,12 +75,9 @@ class trainer:
         self.data = data
         self.set_device(gpu, device)
         self._model = model
-        if predict is not None:
-            self.post_forward = predict
-        else:
-            try:
-                self.post_forward = model.predict
-            except: pass
+        try:
+            self.post_forward = model.predict
+        except: pass
         if out_features is not None:
             self._out_features = out_features
         self.optimizerclass = optimizer
@@ -287,7 +284,6 @@ class trainer:
     def train_correct(self):
         with ordered_dl(self.train_dl) as dl:
             for i, (x, y) in enumerate(dl):
-                x, y = x.to(self.device), y.to(self.device)
                 y_pred = self.predict(x)
                 for ii, yy in zip(i, y == y_pred):
                     print(ii, yy)
@@ -299,38 +295,27 @@ class trainer:
             sums = [ sum(x) for x in zip(*losses) ]
             return sums[0] / sums[1]
 
-    def inverse_transform_y(self, y):
-        try:
-            return self._inverse_transform_y(y)
-        except:
-            try:
-                self._inverse_transform_y = self.data.inverse_transform_y
-            except:
-                self._inverse_transform_y = lambda y: y
-            return self._inverse_transform_y(y)
-
     def validate(self, pbar=None):
         epoch = self.history.create_epoch('valid')
         epoch.report = True
         with torch.set_grad_enabled(False):
             epoch.before_epoch()
-            for *X, y in self.valid_dl:
+            for X, y in self.valid_dl:
                 if self.device is not None:
-                    X = [ x.to(self.device) for x in X ]
-                    y = y.to(self.device)
+                    X, y = X.to(self.device), y.to(self.device)
                 epoch.before_batch(X, y)
                 loss, y_pred = self.loss_xy(X, y)
                 epoch['loss'] += loss.item() * len(y)
                 epoch['n'] += len(y)
-                epoch.after_batch( X, self.inverse_transform_y(y), self.inverse_transform_y( y_pred ), loss )
+                epoch.after_batch( X, y, y_pred, loss )
                 if pbar is not None:
-                    pbar.update(1)
+                    pbar.update(self.data.batch_size)
             epoch['loss'] /= epoch['n']
             epoch.after_epoch()
         return epoch
 
     def loss_xy(self, X, y):
-        y_pred = self.model(*X)
+        y_pred = self.model(X)
         return self.loss(y_pred, y), self.post_forward(y_pred)
 
     def train_batch(self, X, y):
@@ -353,7 +338,7 @@ class trainer:
         model.train()
         reports = math.ceil(epochs / report_frequency)
         maxepoch = self.epochid + epochs
-        batches = len(self.train_dl) * epochs + len(self.valid_dl) * reports
+        batches = len(self.train_dl) * self.data.batch_size * epochs + len(self.valid_dl) * self.data.batch_size * reports
         pbar = tqdm(range(batches), desc='Total')
         for i in range(epochs):
             self.epochid += 1
@@ -361,17 +346,16 @@ class trainer:
             if self.log and (((i + 1) % report_frequency) == 0 or i == epochs - 1):
                 epoch.report = True
             epoch.before_epoch()
-            for *X, y in self.train_dl:
+            for X, y in self.train_dl:
                 if self.device is not None:
-                    X = [ x.to(self.device) for x in X ]
-                    y = y.to(self.device)
+                    X, y = X.to(self.device), y.to(self.device)
                 epoch.before_batch( X, y )
                 self.scheduler.step()
                 loss, y_pred = self.train_batch(X, y)
                 epoch['loss'] += loss.item() * len(y)
                 epoch['n'] += len(y)
-                epoch.after_batch( X, self.inverse_transform_y(y), self.inverse_transform_y(y_pred), loss)
-                pbar.update(1)
+                epoch.after_batch( X, y, y_pred, loss)
+                pbar.update(self.data.batch_size)
             epoch['loss'] /= epoch['n']
             epoch.after_epoch()
             if epoch.report:

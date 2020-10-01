@@ -23,13 +23,17 @@ def adam(model, lr):
 
 sgd = partial(optim.SGD, lr=0.01, momentum=0.5)
 
-binary_cross_entropy = lambda yp, y: -torch.log((y * yp) + (1 - y) * (1 - yp)).sum()
+cross_entropy_loss = nn.CrossEntropyLoss()
 
-def categorical_cross_entropy(y_pred, y):
-    y_pred = torch.clamp(y_pred, 1e-9, 1- 1e-9)
-    one_hot = torch.eye(y_pred.size(1)).to(y_pred.device)
-    y = one_hot[y]
-    return -(y * torch.log(y_pred)).sum(dim=1).mean()
+binary_entropy_loss = nn.BCELoss()
+
+softmax_loss = F.nll_loss
+
+log_softmax = partial(torch.log_softmax, dim=1)
+
+nll_loss = lambda yp, y: - y * torch.log(yp) - (1 - y) * torch.log(1.0 - yp)
+
+mse_loss = nn.MSELoss()
 
 class CLR(torch.optim.lr_scheduler.CyclicLR):
     def __init__(self,

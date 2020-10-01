@@ -53,16 +53,9 @@ class store_sse(training_module):
     def after_batch(self, epoch, X, y, y_pred, loss):
         epoch['sse'] += torch.sum((y_pred - y)**2).item()
 
-class store_sspe(training_module):
-    def after_batch(self, epoch, X, y, y_pred, loss):
-        yy = y > 0
-        epoch['sspen'] += torch.sum(yy).item()
-        epoch['sspe'] += torch.sum(torch.where(yy,((y_pred - y)/y)**2, yy.float())).item()
-
 class store_f1(training_module):
     def after_batch(self, epoch, X, y, y_pred, loss):
-        y = to_numpy(y)
-        epoch['f1'] += f1_score(y, to_numpy(y_pred)) * len(y)
+        epoch['f1'] += f1_score(to_numpy(y), to_numpy(y_pred)) * len(y)
 
 class store_sae(training_module):
     def after_batch(self, epoch, X, y, y_pred, loss):
@@ -70,5 +63,4 @@ class store_sae(training_module):
 
 class store_r2(training_module):
     def after_batch(self, epoch, X, y, y_pred, loss):
-        y = to_numpy(y)
-        epoch['r2'] += r2_score(y, to_numpy(y_pred)) * len(y)
+        epoch['r2'] += r2_score(to_numpy(y), to_numpy(y_pred)) * len(to_numpy(y))

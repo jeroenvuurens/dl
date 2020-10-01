@@ -117,7 +117,7 @@ class Epoch(defaultdict):
     def after_batch(self, X, y, y_pred, loss):
         if self.report:
             for m in self.history.after_batch:
-                m.after_batch(self, X, y, y_pred, loss)
+                    m.after_batch(self, X, y, y_pred, loss)
 
     def after_epoch(self):
         if self.report:

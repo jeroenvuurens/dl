@@ -15,7 +15,6 @@ import torch.nn.functional as F
 from torch.optim import *
 import numpy as np
 import pandas as pd
-import traceback
 
 def list_all(s):
     try:
