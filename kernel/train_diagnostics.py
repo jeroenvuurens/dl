@@ -4,6 +4,7 @@ from tqdm import tqdm_notebook as tqdm
 from torch.optim.lr_scheduler import _LRScheduler
 import matplotlib.pyplot as plt
 from .train_metrics import loss, name_metrics
+from .helper import *
 from math import log, exp
 import statistics
 from functools import partial
@@ -25,16 +26,22 @@ def set_dropouts(dropouts):
      return change
 
 class tuner:
-    def __init__(self, trainer, values, param_update, label='parameter', smooth=0.05, diverge=25, **kwargs):
+    def __init__(self, trainer, lrvalues, lrupdate=None, xlabel='parameter', smooth=0.05, diverge=10, max_validation_mem=None, **kwargs):
         self.history = {"lr": [], "loss": []}
         self.best_loss = None
-        self.label = label
+        self.xlabel = xlabel
         self.trainer = trainer
-        self.values = list(values)
-        self.param_update = param_update
-        self.range_test(smooth, diverge)
+        self.lrvalues = list(lrvalues)
+        self.lrupdate = lrupdate if lrupdate else trainer.set_lr
+        self.smooth = smooth
+        self.diverge = diverge
+        self.max_validation_mem = max_validation_mem
 
-    def reset(self):
+    def __enter__(self):
+        self.trainer.commit('tuner')
+        return self
+
+    def __exit__(self, *args):
         self.trainer.revert('tuner')
 
     def next_train(self):
@@ -44,62 +51,80 @@ class tuner:
             self.train_iterator = iter(self.trainer.train_dl)
             return next(self.train_iterator)
 
-    def range_test( self, smooth, diverge):
-        self.x = []
-        self.loss = []
-        self.sloss = []
-        self.min_loss = None
-        self.trainer.commit('tuner')
-
-        for i in tqdm(self.values):
-            self.x.append(i)
-            self.param_update(i)
-            X, y = self.next_train()
-            if self.trainer.device is not None:
-                X, y = X.to(self.trainer.device), y.to(self.trainer.device)
-
-            loss, pred_y = self.trainer.train_batch(X, y)
-            loss = self.trainer.validate_loss()
-            self.loss.append(loss)
-
-            # Track the best loss and smooth it if smooth_f is specified
-            try:
-                loss = smooth * loss + (1 - smooth) * self.history["loss"][-1]
-            except: pass
-            self.sloss.append(loss)
-
-            try:
-                self.min_loss = min(self.min_loss, loss)
-            except:
-                self.min_loss = loss
-
-            
-
-            # Check if the loss has diverged; if it has, stop the test
-            if loss > diverge * self.min_loss:
-                #print("Stopping early, the loss has diverged")
+    def run( self ):
+        x = []
+        sloss = []
+        validation_set = []
+        mem_validation = 0
+        for  X, y in self.trainer.valid_dl:
+            validation_set.append((X, y))
+            mem_validation += sys.getsizeof(X.storage()) + sys.getsizeof(y.storage())
+            #print(mem_validation)
+            if self.max_validation_mem and mem_validation > self.max_validation_mem:
                 break
-        self.reset()
-        #print("Learning rate search finished. See the graph with {finder_name}.plot()")
+        with plt_notebook():
+            with Plot(xscale='log', xlabel=self.xlabel) as p:
+                for i, lr in enumerate(tqdm(self.lrvalues, leave=False)):
+                    x.append(lr)
+                    self.lrupdate(lr)
+                    X, y = self.next_train()
+                    if self.trainer.device is not None:
+                        X, y = X.to(self.trainer.device), y.to(self.trainer.device)
 
-    def plot(self, log=True):
-        # Get the data to plot from the history dictionary. Also, handle skip_end=0
-        # properly so the behaviour is the expected
-        loss = self.sloss
-        imin = loss.index(self.min_loss)
-        median = statistics.median(loss[:imin+1])
-        self.max_loss = self.min_loss + (median - self.min_loss) * 3
+                    loss, pred_y = self.trainer.train_batch(X, y)
+                    loss = self.trainer.validate_loss(validation_set)
+                    try:
+                        loss = self.smooth * loss + (1 - self.smooth) * sloss[-1]
+                    except: pass
+                    sloss.append(loss)
 
-        skip_end = next((x[0]+1 for x in enumerate(loss) if x[0] > imin and x[1] > self.max_loss), len(loss))
-        x = self.x[:skip_end]
-        loss = loss[:skip_end]
+                    try:
+                        if i > len(self.lrvalues) / 4 and loss > self.diverge * min_loss:
+                            #print("Stopping early, the loss has diverged")
+                            break
+                        min_loss = min(min_loss, loss)
+                    except:
+                        min_loss = loss
+                    p.replot( x, sloss )
 
-        # Plot loss as a function of the learning rate
-        plt.plot( x, loss)
-        plt.ylim( self.min_loss, self.max_loss )
-        if log:
-            plt.xscale("log")
-        plt.xlabel(self.label)
-        plt.ylabel("Loss")
-        plt.show()
+    def run_multi( self, param2_values, param2_update ):
+        param2_values = list(param2_values)
+        for p in param2_values:
+            param2_update(p)
+            self.trainer.commit(f'param2_{p:.2E}')
+        x = []
+        sloss = { f'{p:.2E}':[] for p in param2_values }
+        with plt_notebook():
+            with Plot(xscale='log', xlabel=self.xlabel) as plot:
 
+                dropped_param2_values = []
+                for lr in tqdm(self.lrvalues, leave=False):
+                    x.append(lr)
+                    X, y = self.next_train()
+                    if self.trainer.device is not None:
+                        X, y = X.to(self.trainer.device), y.to(self.trainer.device)
+                    for p in param2_values:
+                        self.trainer.checkout(f'param2_{p:.2E}')
+                        param2_update(p)
+                        self.lrupdate(lr)
+                        loss, pred_y = self.trainer.train_batch(X, y)
+                        loss = self.trainer.validate_loss()
+                        try:
+                            loss = smooth * loss + (1 - smooth) * sloss[f'{p:.2E}'][-1]
+                        except: pass
+                        sloss[f'{p:.2E}'].append(loss)
+                        print(self.trainer.optimizer.param_groups[0]['weight_decay'])
+                        print(f'param2_{p:.2E} {loss}')
+
+                        try:
+                            if loss > diverge * min_loss:
+                                dropped_param2_values.append(p)
+                            min_loss = min(min_loss, loss)
+                        except:
+                            min_loss = loss
+                    for p in param2_values:
+                        self.trainer.commit(f'param2_{p:.2E}')
+                    plot.multiplot( x, sloss )
+
+        for p in param2_values:
+            self.trainer.remove_checkpoint(f'param2_{p:.2E}')

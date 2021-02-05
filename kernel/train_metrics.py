@@ -1,5 +1,5 @@
 from .train_modules import *
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import *
 import math
 
 def name_metrics(metrics):
@@ -14,9 +14,6 @@ class train_metrics():
     def __init__(self, history=None):
         self.history = history
         
-    def requirements(self):
-        pass
-    
     @property
     def __name__(self):
         return self.__name()
@@ -24,83 +21,81 @@ class train_metrics():
     def __name(self):
         return self.__class__.__name__
   
-    @staticmethod
-    def value(epoch):
-        pass
+    @classmethod
+    def value(cls, epoch):
+        try:
+            return epoch[cls.__name__]
+        except:
+            return cls.value2(epoch)
         
 class acc(train_metrics):
-    def requirements(self):
-        self.history.require_module(store_contingencies)
-    
     @staticmethod
-    def value(epoch):
-        return (epoch['tp'] + epoch['tn']) / epoch['n']
+    def value2(epoch):
+        return accuracy_score(epoch.y, epoch.y_pred.reshape(epoch.y.shape).round())
 
 class acc_mc(train_metrics):
-    def requirements(self):
-        self.history.require_module(store_confusion)
-    
     @staticmethod
-    def value(epoch):
-        return np.diag(epoch['cm']).sum() / epoch['n']
+    def value2(epoch):
+        return accuracy_score(epoch.y, np.argmax(epoch.y_pred, axis=1))
 
 class recall(train_metrics):
-    def requirements(self):
-        self.history.require_module(store_contingencies)
-
     @staticmethod
-    def value(epoch):
-        try:
-            return epoch['tp'] / (epoch['tp'] + epoch['fn']) 
-        except:
-            return 0
+    def value2(epoch):
+        return recall_score(epoch.y, epoch.y_pred.reshape(epoch.y.shape).round())
+
+class recall4(train_metrics):
+    @staticmethod
+    def value2(epoch):
+        return recall_score(epoch.y > 1, epoch.y_pred.reshape(epoch.y.shape).round())
 
 class precision(train_metrics):
-    def requirements(self):
-        self.history.require_module(store_contingencies)
-
     @staticmethod
-    def value(epoch):
-        try:
-            return epoch['tp'] / (epoch['tp'] + epoch['fp']) 
-        except:
-            return 0
+    def value2(epoch):
+        return precision_score(epoch.y, epoch.y_pred.reshape(epoch.y.shape).round())
+
+class precision4(train_metrics):
+    @staticmethod
+    def value2(epoch):
+        return precision_score(epoch.y > 1, epoch.y_pred.reshape(epoch.y.shape).round())
+
+class f1_4(train_metrics):
+    @staticmethod
+    def value2(epoch):
+        return f1_score(epoch.y > 1, epoch.y_pred.reshape(epoch.y.shape).round())
+
+class fp_4(train_metrics):
+    @staticmethod
+    def value2(epoch):
+        return fbeta_score(epoch.y > 1, epoch.y_pred.reshape(epoch.y.shape).round(), beta=0.2)
 
 class f1(train_metrics):
-    def requirements(self):
-        self.history.require_module(store_f1)
-
     @staticmethod
-    def value(epoch):
-        return epoch['f1'] / epoch['n']
+    def value2(epoch):
+        return f1_score(epoch.y, epoch.y_pred.reshape(epoch.y.shape).round())
+
+class fp(train_metrics):
+    @staticmethod
+    def value2(epoch):
+        return fbeta_score(epoch.y, epoch.y_pred.reshape(epoch.y.shape).round(), beta=0.2)
 
 class mse(train_metrics):
-    def requirements(self):
-        self.history.require_module(store_sse)
-
     @staticmethod
-    def value(epoch):
-        return epoch['sse'] / epoch['n']
+    def value2(epoch):
+        return mean_squared_error(epoch.y, epoch.y_pred.reshape(epoch.y.shape))
 
 class rmse(train_metrics):
-    def requirements(self):
-        self.history.require_module(store_sse)
-
     @staticmethod
-    def value(epoch):
-        return math.sqrt(epoch['sse'] / epoch['n'])
+    def value2(epoch):
+        return math.sqrt(mean_squared_error(epoch.y, epoch.y_pred.reshape(epoch.y.shape)))
 
 class r2(train_metrics):
-    def requirements(self):
-        self.history.require_module(store_r2)
-
     @staticmethod
-    def value(epoch):
-        return epoch['r2'] / epoch['n']
-
+    def value2(epoch):
+        return r2_score(epoch.y, epoch.y_pred.reshape(epoch.y.shape))
 
 class loss(train_metrics):
     @staticmethod
-    def value(epoch):
+    def value2(epoch):
         return epoch['loss']    
     
+

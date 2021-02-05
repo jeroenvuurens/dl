@@ -103,16 +103,14 @@ class CLR(torch.optim.lr_scheduler.CyclicLR):
 
         super(torch.optim.lr_scheduler.CyclicLR, self).__init__(optimizer, last_epoch)
 
-def cyclical_scheduler(trainer):
-    batches = math.ceil(len(trainer.train_rows) / trainer.train_dl.batch_size) * trainer.cycle_epochs
-    if batches <= 1:
-        print('warning: cannot use cyclical scheduler with a single batch')
-        batches = 2
-    stepsize = batches // 2
-    base_lr, max_lr = trainer.lr
-    return CLR(trainer.optimizer, base_lr, max_lr, step_size_up=stepsize, step_size_down=batches - stepsize, mode='triangular', cycle_momentum=False)
+def cyclicallr(optimizer, min_lr, max_lr, steps):
+    steps_size_down=steps - steps // 2
+    return CLR(optimizer, min_lr, max_lr, step_size_up=steps // 2, step_size_down=steps_size_down, mode='triangular', cycle_momentum=False)
 
-def uniform_scheduler(trainer):
+def onecyclelr(optimizer, min_lr, max_lr, steps):
+    return optim.lr_scheduler.OneCycleLR(optimizer, max_lr=max_lr, total_steps=steps)
+
+def uniformlr():
     class Uniform_Scheduler:
         def step(self):
             pass

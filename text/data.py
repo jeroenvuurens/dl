@@ -3,13 +3,14 @@ import html
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
-from torchtext.datasets import TranslationDataset, Multi30k
+from torchtext.data.utils import get_tokenizer
+from torchtext.experimental.datasets import IMDB, Multi30k
 from torchtext.data import Field, BucketIterator, TabularDataset
 from torchtext.vocab import Vectors
 from sklearn.model_selection import train_test_split
 from torchtext.vocab import GloVe
-
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 import spacy
 import dill as pickle
 import random
@@ -17,53 +18,8 @@ import math
 import time
 import re
 
+tokenizer = get_tokenizer("spacy")
 identity=lambda x:x
-
-def stripper(regex):
-    regex = re.compile(regex)
-    def strip(text):
-        return re.sub(regex, ' ', text) # remove section
-    return strip
-
-tag_stripper = stripper('<.*?>')
-
-def boolean_label(positive):
-    def tokenize(text):
-        return 1 if text == positive else 0
-        #return (0.0, 1.0) if text == positive else (1.0, 0.0)
-    return tokenize
-
-def tokenizer(lang='en', reverse=False, pre=identity, post=identity):
-    tok = spacy.load(lang, disable=["tagger", "parser", "ner", "textcat"])
-    if reverse:
-        def tokenize(text):
-            return [post(t.text) for t in tok.tokenizer(pre(text))][::-1]
-    else:
-        def tokenize(text):
-            return [post(t.text) for t in tok.tokenizer(pre(text))]
-    return tokenize
-
-class TextField(Field):
-   def __init__(self, lang, sos='<sos>', eos='<eos>', lower=True, vectors=None, include_lengths=False, **kwargs):
-       self.tokenizer = tokenizer(lang, **kwargs)
-       super().__init__(tokenize = self.tokenizer, init_token=sos, eos_token=eos, lower=lower, include_lengths=include_lengths)
-
-class LabelField(Field):
-    def __init__(self, dtype=torch.long, **kwargs):
-        super().__init__(sequential=False, use_vocab=False, pad_token=None,  unk_token=None, dtype=dtype, **kwargs)
-
-class BatchGenerator:
-    def __init__(self, dl, x_field, y_field):
-        self.dl, self.x_field, self.y_field = dl, x_field, y_field
-        
-    def __len__(self):
-        return len(self.dl)
-    
-    def __iter__(self):
-        for batch in self.dl:
-            X = getattr(batch, self.x_field)
-            y = getattr(batch, self.y_field)
-            yield (X,y)
 
 def save_to_pickle(dataSetObject,PATH):
     with open(PATH,'wb') as output:
@@ -89,7 +45,7 @@ def load_pickle(PATH, FIELDNAMES, FIELD):
     return exampleListObject 
 
 class TextData:
-    def __init__(self, fields, train, valid=None, vectors=None, sortkey=None, batch_size=32,
+    def __init__(self, train, valid=None, batch_size=32,
                  sort_within_batch=False, repeat=False, sort=False, shuffle=False, y_field_ind=1, cache_valid=False):
         self.train_ds = train
         self.valid_ds = valid
@@ -172,5 +128,16 @@ class TextData:
         fields = [ (n, pickle.load(open(f'{path}/{n}.field.pkl', 'rb'))) for n, _ in fields ]
         train, valid = TabularDataset( path=filename, format='csv', skip_header=skip_header, fields=fields).split(1-valid_perc)
         return cls( fields, train, valid, **kwargs ) 
+
+    @classmethod
+    def from_datasets(cls, train_ds, valid_ds):
+        data = cls(train_ds, valid_ds)
+        return data
+
+def imdb(tokenizer=None):
+    if not tokenizer:
+        tokenizer=get_tokenizer("spacy")
+    train_ds, valid_ds = IMDB(tokenizer=tokenizer) 
+    return TextData.from_datasets(train_ds, valid_ds)
 
 

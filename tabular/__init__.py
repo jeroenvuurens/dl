@@ -6,11 +6,11 @@ from ..kernel.train_metrics import *
 from ..kernel.train_history import *
 from ..kernel.jcollections import *
 from ..kernel.transfer import *
+from ..kernel.perceptron import *
 from ..kernel.optimizers import *
 from ..kernel.helper import *
 from ..version import __version__
 from .data import *
-from .models import *
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
