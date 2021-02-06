@@ -5,7 +5,6 @@ from .kernel.train_diagnostics import *
 from .kernel.train_metrics import *
 from .kernel.train_history import *
 from .kernel.jcollections import *
-from .kernel.optimizers import *
 from .kernel.transfer import *
 from .kernel.perceptron import *
 from .version import __version__

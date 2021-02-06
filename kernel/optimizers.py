@@ -18,23 +18,6 @@ from .jcollections import *
 from .helper import *
 from functools import partial
 
-def adam(model, lr):
-    return optim.Adam(model.parameters(), lr=lr)
-
-sgd = partial(optim.SGD, lr=0.01, momentum=0.5)
-
-cross_entropy_loss = nn.CrossEntropyLoss()
-
-binary_entropy_loss = nn.BCELoss()
-
-softmax_loss = F.nll_loss
-
-log_softmax = partial(torch.log_softmax, dim=1)
-
-nll_loss = lambda yp, y: - y * torch.log(yp) - (1 - y) * torch.log(1.0 - yp)
-
-mse_loss = nn.MSELoss()
-
 class CLR(torch.optim.lr_scheduler.CyclicLR):
     def __init__(self,
                  optimizer,

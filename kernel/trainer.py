@@ -13,7 +13,6 @@ from .train_diagnostics import *
 from .train_metrics import *
 from .train_history import *
 from .jcollections import *
-from .optimizers import *
 from .transfer import *
 from .helper import *
 from functools import partial
@@ -46,6 +45,12 @@ def last_container(last):
 #        children = list(last.children())
 #
 #    return l[-1]
+
+def uniformlr():
+    class Uniform_Scheduler:
+        def step(self):
+            pass
+    return Uniform_Scheduler()
 
 class ordered_dl:
     def __init__(self, dl):
@@ -82,7 +87,7 @@ class databunch:
             return self._device
 
 class trainer:
-    def __init__(self, model, db=None, train_dl=None, valid_dl=None, report_frequency=1, report_phases=['train','valid'], metrics = [loss, acc], modules=[], optimizer=AdamW, optimizerparams=dict(), loss=cross_entropy_loss, out_features=None, random_state=None, log=True, cycle_epochs=1.0, scheduler='onecycle', weight_decay=None, momentum=None, device=None, gpu=None, **kwargs):
+    def __init__(self, model, db=None, train_dl=None, valid_dl=None, loss=None, report_frequency=1, report_phases=['train','valid'], metrics = [loss, acc], modules=[], optimizer=Adam, optimizerparams=dict(), out_features=None, random_state=None, log=True, cycle_epochs=1.0, scheduler='onecycle', weight_decay=None, momentum=None, device=None, gpu=None, **kwargs):
         self.report_frequency = report_frequency
         self.report_phases = report_phases
         self.metrics = metrics
@@ -242,8 +247,10 @@ class trainer:
             if type(self.lr) is list:
                 steps = int(round((len(self.train_dl) * self.cycle_epochs)))
                 if self.schedulertype == 'cyclic':
+                    from optimizers import cyclicallr
                     self._scheduler = cyclicallr(self.optimizer, self.min_lr, self.max_lr, steps)
                 elif self.schedulertype == 'onecycle':
+                    from optimizers import onecyclelr
                     self._scheduler = onecyclelr(self.optimizer, self.min_lr, self.max_lr, steps)
                 else:
                     self._scheduler = uniformlr()
