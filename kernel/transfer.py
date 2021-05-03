@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torchvision.models as models
 import os
@@ -52,3 +53,5 @@ class Transfer(DLModel):
     def forward(self, x):
         return self.model( x )
 
+    def post_forward(self, y):
+        return torch.argmax(y, axis=1)

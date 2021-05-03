@@ -6,6 +6,7 @@ from ..kernel.train_history import *
 from ..kernel.jcollections import *
 from ..kernel.transfer import *
 from ..kernel.optimizers import *
+from ..kernel.perceptron import *
 from ..version import __version__
 from .data import *
 from .models import *

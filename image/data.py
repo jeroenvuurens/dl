@@ -1,8 +1,8 @@
 import pandas as pd
 import numpy as np
-import fastai.vision
 import torch
 import math
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset, random_split
 import matplotlib.pyplot as plt
 from torchvision.datasets import MNIST, ImageFolder
@@ -10,7 +10,7 @@ from torchvision.transforms import transforms
 from ..kernel.helper import *
 import os
 
-""" A Databunch is used in FastAI to wrap datasets for training and validation. A Databunch should provide dataloaders for both via train_dl and valid_dl.
+""" A Databunch should provide dataloaders for both via train_dl and valid_dl.
 """ 
 
 def subplots(rows, cols, imgsize=4, figsize=None, title=None, **kwargs):
@@ -59,10 +59,12 @@ class ImageDataset(Dataset):
 #    return data
 
 class image_databunch:
-    def __init__(self, train_ds, valid_ds, batch_size=32, shuffle=True, num_workers=0, pin_memory=False, device=torch.device('cuda:0')):
+    def __init__(self, train_ds, valid_ds, batch_size=32, valid_batch_size=None, shuffle=True, num_workers=0, pin_memory=False, valid_pin_memory=None, device=torch.device('cuda:0')):
         self.train_ds = train_ds
         self.valid_ds = valid_ds
         self.batch_size = batch_size
+        self.valid_batch_size = batch_size if valid_batch_size is None else valid_batch_size
+        self.valid_pin_memory = pin_memory if valid_pin_memory is None else valid_pin_memory
         self.num_workers = num_workers
         self.shuffle = shuffle
         self.pin_memory = pin_memory
@@ -134,7 +136,7 @@ class image_databunch:
         try:
             return self._valid_dl
         except:
-            self._valid_dl = DataLoader(self.valid_ds, shuffle=False, num_workers=self.num_workers, batch_size=self.batch_size, pin_memory=self.pin_memory)
+            self._valid_dl = DataLoader(self.valid_ds, shuffle=False, num_workers=self.num_workers, batch_size=self.valid_batch_size, pin_memory=self.valid_pin_memory)
             return self._valid_dl
 
     @valid_dl.setter
@@ -251,30 +253,20 @@ class image_databunch:
         return cls(train_ds, valid_ds, **kwargs)
 
 class FastMNIST(MNIST):
-    def __init__(self, *args, transform=None, device=torch.device('cuda:0'), **kwargs):
+    def __init__(self, *args, transform=None, device=torch.device('cuda:80'), size=None, **kwargs):
         super().__init__(*args, **kwargs)
         
-        self.transform=transform
         # Scale data to [0,1]
         self.data = self.data.unsqueeze(1).float().div(255)
-        
+        if size is not None:
+            self.data = F.interpolate(self.data, (size, size))
         # Normalize it with the usual MNIST mean and std
         self.data = self.data.sub_(0.1307).div_(0.3081)
-        
         # Put both data and targets on GPU in advance
-        if transform:
-            self.data, self.targets = self.data, self.targets
-        else:
+        if device is not None:
             self.data, self.targets = self.data.to(device), self.targets.to(device)
 
     def __getitem__(self, index):
-        """
-        Args:
-            index (int): Index
-
-        Returns:
-            tuple: (image, target) where target is index of the target class.
-        """
         img, target = self.data[index], self.targets[index]
 
         if self.transform:
@@ -282,14 +274,42 @@ class FastMNIST(MNIST):
 
         return img, target
 
-def mnist(path='/data/datasets/mnist2', num_workers=0, batch_size=64, **kwargs):
-    train_ds = FastMNIST(path, train=True, **kwargs)
-    kwargs['transform'] = None
-    valid_ds = FastMNIST(path, train=False, **kwargs)
+class FastMNIST3(MNIST):
+    def __init__(self, *args, transform=None, device=None, size=None, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Scale data to [0,1]
+        self.data = self.data.unsqueeze(1).float().div(255)
+        if size is not None:
+            self.data = F.interpolate(self.data, (size, size))
+        # Normalize it with the usual MNIST mean and std
+        self.data = self.data.sub_(0.1307).div_(0.3081)
+        # Put both data and targets on GPU in advance
+        if device is not None:
+            self.data, self.targets = self.data.to(device), self.targets.to(device)
+
+    def __getitem__(self, index):
+        img, target = self.data[index], self.targets[index]
+
+        if self.transform:
+            img = self.transform(img)
+        img = torch.cat([img, img, img], axis=0)
+
+        return img, target
+
+def mnist(path='/data/datasets/mnist2', num_workers=0, batch_size=64, transform=None, **kwargs):
+    train_ds = FastMNIST(path, transform=transform, train=True, **kwargs)
+    valid_ds = FastMNIST(path, transform=transform, train=False, **kwargs)
     db = image_databunch(train_ds, valid_ds, num_workers=num_workers, batch_size=batch_size)
     return db
 
-def mnist3(path='/data/datasets/mnist', num_workers=0, batch_size=64, size=28, **kwargs):
+def mnist3(path='/data/datasets/mnist2', num_workers=0, batch_size=64, transform=None, **kwargs):
+    train_ds = FastMNIST3(path, transform=transform, train=True, **kwargs)
+    valid_ds = FastMNIST3(path, transform=transform, train=False, **kwargs)
+    db = image_databunch(train_ds, valid_ds, num_workers=num_workers, batch_size=batch_size)
+    return db
+
+def mnist3old(path='/data/datasets/mnist', num_workers=0, batch_size=64, size=28, **kwargs):
     return image_databunch.from_image_folder(path, transforms=image_databunch.get_transformations(do_flip=False, size=size), num_workers=num_workers, **kwargs)
 
 def cifar(path='/data/datasets/mnist', num_workers=0, batch_size=64, **kwargs):

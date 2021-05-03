@@ -1,6 +1,7 @@
 from icrawler.builtin import GoogleImageCrawler
 import ipywidgets as widgets
-from tqdm import tqdm_notebook as tqdm
+from tqdm.notebook import tqdm
+#from tqdm import tqdm_notebook as tqdm
 from imagecleaner.cli import *
 import os
 

@@ -2,8 +2,6 @@ from .kernel.gpu import *
 from .kernel.trainer import *
 from .kernel.train_modules import *
 from .kernel.train_diagnostics import *
-from .kernel.train_metrics import *
-from .kernel.train_history import *
 from .kernel.jcollections import *
 from .kernel.transfer import *
 from .kernel.perceptron import *
@@ -15,6 +13,7 @@ import torch.nn.functional as F
 from torch.optim import *
 import numpy as np
 import pandas as pd
+import pipetorch as pt
 
 def list_all(s):
     try:

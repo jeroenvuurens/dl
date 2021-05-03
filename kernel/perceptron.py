@@ -13,12 +13,12 @@ class SingleLayerPerceptron(nn.Module):
     def forward(self, x):
         pred_y = self.a1(self.w1(x))
         return pred_y.view(-1)
-
+    
 class SingleLayerPerceptron_BinaryClass(SingleLayerPerceptron):
     def __init__(self, input, output):
         super().__init__(input, output, nn.Sigmoid())
 
-    def predict(self, y):
+    def post_forward(self, y):
         return (y > 0.5).float()
 
 class SingleLayerPerceptron_MultiClass(SingleLayerPerceptron):
@@ -28,8 +28,8 @@ class SingleLayerPerceptron_MultiClass(SingleLayerPerceptron):
 def flatten_r_image(x):
         return  x[:,0,:,:].view(x.shape[0], -1)
 
-class MultiLayerPerceptron_BinaryClass(nn.Module):
-    def __init__(self, *width, preprocess=identity, inner_activation=nn.ReLU(), drop_prob=None, last_activation=nn.Sigmoid()):
+class MultiLayerPerceptron_MultiClass(nn.Module):
+    def __init__(self, *width, preprocess=identity, inner_activation=nn.ReLU(), drop_prob=None, last_activation=identity):
         super().__init__()
         self.actions = [preprocess]
         for n, (i, o) in enumerate(zip(width[:-1], width[1:])):
@@ -49,28 +49,25 @@ class MultiLayerPerceptron_BinaryClass(nn.Module):
             self.reshape = (-1)
         else:
             self.reshape = (-1, width[-1])
-
+        
     def forward(self, x):
         for a in self.actions:
             x = a(x)
         return x.view(self.reshape)
 
-    def predict(self, y):
+    def post_forward(self, y):
+        return torch.argmax(y, axis=1)
+
+class MultiLayerPerceptron_BinaryClass(MultiLayerPerceptron_MultiClass):
+    def __init__(self, *width, preprocess=identity, inner_activation=nn.ReLU(), drop_prob=None):
+        super().__init__(*width, preprocess=preprocess, inner_activation=inner_activation, drop_prob=drop_prob, last_activation=nn.nn.Sigmoid())
+
+    def post_forward(self, y):
         return (y > 0.5).float()
 
-class MultiLayerPerceptron_MultiClass(MultiLayerPerceptron_BinaryClass):
-    def __init__(self, *width, preprocess=identity, inner_activation=nn.ReLU(), drop_prob=None):
-        super().__init__(*width, preprocess=preprocess, inner_activation=inner_activation, drop_prob=drop_prob, last_activation=nn.LogSoftmax(dim=1))
-
-    def predict(self, y):
-        return y
-
-class MultiLayerPerceptron(MultiLayerPerceptron_BinaryClass):
+class MultiLayerPerceptron(MultiLayerPerceptron_MultiClass):
     def __init__(self, *width, preprocess=identity, inner_activation=nn.ReLU(), drop_prob=None):
         super().__init__(*width, preprocess=preprocess, inner_activation=inner_activation, drop_prob=drop_prob, last_activation=identity)
-
-    def predict(self, y):
-        return y
 
 class TwoLayerPerceptron(nn.Module):
     def __init__(self, input, hidden, output, last_activation=None):
@@ -86,14 +83,14 @@ class TwoLayerPerceptron(nn.Module):
         pred_y = self.a2(self.w2(x))
         return pred_y.view(-1)
 
-    def predict(self, y):
+    def post_forward(self, y):
         return y 
 
 class TwoLayerPerceptron_BinaryClass(TwoLayerPerceptron):
     def __init__(self, input, hidden, output):
         super().__init__(input, hidden, output, last_activation=nn.Sigmoid())
 
-    def predict(self, y):
+    def post_forward(self, y):
         return (y > 0.5).float()
 
 class TwoLayerPerceptron_MultiClass(TwoLayerPerceptron):

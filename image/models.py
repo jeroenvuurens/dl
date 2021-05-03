@@ -39,10 +39,10 @@ logsoftmax =nn.LogSoftmax(dim=1)
 def conv_mnist(*layers, size=28, kernel_size=3, stride=1, padding=None, pool_size=2, pool_stride=2, preprocess=grab_r_channel, batchnorm=False, num_classes=10):
     return convnet(*layers, size=size, kernel_size=kernel_size, stride=stride, padding=padding, pool_size=pool_size, pool_stride=pool_stride, preprocess=preprocess, batchnorm=False, num_classes=10)
 
-def convnet(*layers, size=28, kernel_size=3, stride=1, padding=None, pool_size=2, pool_stride=2, preprocess=None, batchnorm=False, num_classes=2, dropout=0):
+def convnet(*layers, size=28, kernel_size=3, stride=1, padding=None, pool_size=2, pool_stride=2, preprocess=None, batchnorm=False, num_classes=2, final_activation=lambda x:x, dropout=0):
     padding = kernel_size // 2
     
-    class ConvMnist(nn.Module):
+    class ConvNet(nn.Module):
         "ConvNet"
         def __init__(self):
             super().__init__()
@@ -67,7 +67,7 @@ def convnet(*layers, size=28, kernel_size=3, stride=1, padding=None, pool_size=2
                 hpixels = compute_size(hpixels, pool_size, pool_stride, 0, f'horizontal pool{n}')
                 vpixels = compute_size(vpixels, pool_size, pool_stride, 0, f'vertical pool{n}')
             self.fc = nn.Linear(o * hpixels * vpixels, num_classes)
-            self.fa = nn.LogSoftmax(dim=1)
+            self.fa = final_activation
         
         def forward(self, x):
             if preprocess is not None:
@@ -77,5 +77,8 @@ def convnet(*layers, size=28, kernel_size=3, stride=1, padding=None, pool_size=2
             x = x.reshape(x.size(0), -1)
             x = self.fc(x)
             return self.fa(x)
+        
+        def post_forward(self, y):
+            return torch.argmax(y, axis=1)
 
-    return ConvMnist()
+    return ConvNet()

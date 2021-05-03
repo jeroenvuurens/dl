@@ -1,14 +1,14 @@
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-from torch.optim import Optimizer
+from torch.optim.optimizer import *
+from torch.optim.lr_scheduler import *
 import timeit
 import copy
 import numpy as np
 import math
-from tqdm import tqdm_notebook as tqdm
+from tqdm.notebook import tqdm
+#from tqdm import tqdm_notebook as tqdm
 #from .train_diagnostics2 import *
 from .train_diagnostics import *
 from .train_metrics import *
@@ -18,7 +18,7 @@ from .jcollections import *
 from .helper import *
 from functools import partial
 
-class CLR(torch.optim.lr_scheduler.CyclicLR):
+class CLR(CyclicLR):
     def __init__(self,
                  optimizer,
                  base_lr,
@@ -84,14 +84,14 @@ class CLR(torch.optim.lr_scheduler.CyclicLR):
             self.base_momentums = list(map(lambda group: group['momentum'], optimizer.param_groups))
             self.max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
 
-        super(torch.optim.lr_scheduler.CyclicLR, self).__init__(optimizer, last_epoch)
+        super().__init__(optimizer, base_lr, max_lr, last_epoch=last_epoch, cycle_momentum=cycle_momentum)
 
 def cyclicallr(optimizer, min_lr, max_lr, steps):
     steps_size_down=steps - steps // 2
     return CLR(optimizer, min_lr, max_lr, step_size_up=steps // 2, step_size_down=steps_size_down, mode='triangular', cycle_momentum=False)
 
 def onecyclelr(optimizer, min_lr, max_lr, steps):
-    return optim.lr_scheduler.OneCycleLR(optimizer, max_lr=max_lr, total_steps=steps)
+    return OneCycleLR(optimizer, max_lr=max_lr, total_steps=steps)
 
 def uniformlr():
     class Uniform_Scheduler:

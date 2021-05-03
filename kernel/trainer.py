@@ -8,13 +8,14 @@ import sys
 import copy
 import numpy as np
 import math
-from tqdm import tqdm_notebook as tqdm
+#from tqdm import tqdm_notebook as tqdm
+from tqdm.notebook import tqdm
+from pipetorch import Evaluator
 from .train_diagnostics import *
-from .train_metrics import *
-from .train_history import *
 from .jcollections import *
 from .transfer import *
 from .helper import *
+from .optimizers import *
 from functools import partial
 import os
 try:
@@ -67,44 +68,34 @@ class ordered_dl:
         if exc_type is not None:
             return False
 
-class databunch:
-    def __init__(self, train_dl, valid_dl, test_dl=None, device=None):
-        self.train_dl = train_dl
-        self.valid_dl = valid_dl
-        self.test_dl = test_dl
-        if device:
-            self._device = device
-
-    @property
-    def device(self):
-        try:
-            return self._device
-        except:
-            try:
-                self._device = next(iter(self.train_dl)).device
-            except:
-                self._device = next(iter(self.train_dl))[0].device
-            return self._device
+class Eval(object):
+    def __init__(self, trainer):
+        self.trainer = trainer
+    def __enter__(self):
+        self.model.eval()
+        self.model.set_grad_enabled(False)
+        return self.trainer.model
+    def __exit__(self, type, value, traceback):
+        self.model.set_grad_enabled(True)
+        self.trainer.model.train()
 
 class trainer:
-    def __init__(self, model, db=None, train_dl=None, valid_dl=None, loss=None, report_frequency=1, report_phases=['train','valid'], metrics = [loss, acc], modules=[], optimizer=Adam, optimizerparams=dict(), out_features=None, random_state=None, log=True, cycle_epochs=1.0, scheduler='onecycle', weight_decay=None, momentum=None, device=None, gpu=None, **kwargs):
+    def __init__(self, model, loss, *data, report_frequency=1, report_phases=['train','valid'], metrics = [], optimizer=Adam, optimizerparams=dict(), out_features=None, random_state=None, cycle_epochs=1.0, scheduler='onecycle', weight_decay=None, momentum=None, device=None, gpu=None, evaluator=None, **kwargs):
         self.report_frequency = report_frequency
         self.report_phases = report_phases
-        self.metrics = metrics
-        self.modules = modules
         self.loss = loss
         self.random_state = random_state
-        self.log = log
         self.cycle_epochs = cycle_epochs
         if gpu is not None:
             if gpu == -1:
                 device = torch.device('cpu')
             else:
                 device = torch.device(f'cuda:{gpu}')
-        self.set_data(db=db, train_dl=train_dl, valid_dl=valid_dl, device=device)
+        self.device = device
+        self.set_data(*data)
         self._model = model
         try:
-            self.post_forward = model.predict
+            self.post_forward = model.post_forward
         except: pass
         if out_features is not None:
             self._out_features = out_features
@@ -114,35 +105,53 @@ class trainer:
         if self.random_state is not None:
             torch.backends.cudnn.deterministic=True
             torch.manual_seed(self.random_state)
-        self.history
         self._commit = {}
         self.epochid = 0
         self.weight_decay = weight_decay
         self.momentum = momentum
         self.lowest_score=None
         self.highest_score=None
-
-    def set_data(self, db=None, train_dl=None, valid_dl=None, device=None):
-        if db:
-            assert train_dl is None, 'You cannot specify both data and train_dl'
-            assert valid_dl is None, 'You cannot specify both data and valid_dl'
-            assert db.train_dl, 'The databunch you provided must have a train_dl'
-            assert db.valid_dl, 'The databunch you provided must have a valid_dl'
-            self.data = db
-        elif not valid_dl:
-            assert train_dl, 'No data provided'
-            self.data = databunch(train_dl, train_dl, device=device)
+        if evaluator is not None:
+            assert len(metrics) == 0, 'When you assign an evaluator, you cannot assign different metrics to a trainer'
+            self._evaluator = evaluator
+            self.metrics = evaluator.metrics
         else:
-            assert train_dl, 'No data provided'
-            self.data = databunch(train_dl, valid_dl, device=device)
+            self.metrics = metrics
+
+    def set_data(self, *data):
+        assert len(data) > 0, 'You have to specify a data source. Either a databunch or a set of dataloaders'
+        if len(data) == 1:
+            db = data[0]
+            self.data = db
+        elif len(data) < 4:
+            try:
+                _ = iter(data[0])
+                self.train_dl = data[0]
+            except TypeError:
+                raise TypeError('The first data source must be iterable, preferably a DataLoader that provide an X and y')
+            try:
+                _ = iter(data[1])
+                self.valid_dl = data[1]
+            except TypeError:
+                raise TypeError('The second data source must be iterable, preferably a DataLoader that provide an X and y')
+            if len(data) > 2:
+                try:
+                    _ = iter(data[2])
+                    self.test_dl = data[2]
+                except TypeError:
+                    raise TypeError('The third data source must be iterable, preferably a DataLoader that provide an X and y')
+
+    @property
+    def evaluator(self):
         try:
-            self.device = device if device else self.data.device
+            return self._evaluator
         except:
             try:
-                self.device = next(iter(self.train_dl)).device
+                self._evaluator = self.db.to_evaluator( *self.metrics )
             except:
-                self.device = next(iter(self.train_dl))[0].device
-
+                self._evaluator = Evaluator(self, *self.metrics)
+            return self._evaluator
+            
     def __repr__(self):
         return 'Trainer( ' + self.model + ')'
 
@@ -159,14 +168,31 @@ class trainer:
         self.to(torch.device('cuda:0'))
 
     @property
+    def metrics(self):
+        return self._metrics
+    
+    @metrics.setter
+    def metrics(self, value):
+        try:
+            iter(value)
+            self._metrics = value
+        except:
+            self._metrics = [] if value is None else [value] 
+        
+    @property
     def data(self):
         return self._data
 
     @data.setter
-    def data(self, value):
-        self._data = value
+    def data(self, db):
+        assert hasattr(db, 'train_dl'), 'A single data source must be an object with a train_dl property (like a databunch)'
+        assert hasattr(db, 'valid_dl'), 'A single data source must be an object with a valid_dl property (like a databunch)'
+        self._data = db
         self.train_dl = self.data.train_dl
         self.valid_dl = self.data.valid_dl
+        try:
+            self.test_dl = self.data.test_dl
+        except: pass
 
     @property
     def min_lr(self):
@@ -247,10 +273,10 @@ class trainer:
             if type(self.lr) is list:
                 steps = int(round((len(self.train_dl) * self.cycle_epochs)))
                 if self.schedulertype == 'cyclic':
-                    from optimizers import cyclicallr
+                    from .optimizers import cyclicallr
                     self._scheduler = cyclicallr(self.optimizer, self.min_lr, self.max_lr, steps)
                 elif self.schedulertype == 'onecycle':
-                    from optimizers import onecyclelr
+                    from .optimizers import onecyclelr
                     self._scheduler = onecyclelr(self.optimizer, self.min_lr, self.max_lr, steps)
                 else:
                     self._scheduler = uniformlr()
@@ -297,29 +323,34 @@ class trainer:
         while type(first) is nn.Sequential:
             first = next(iter(first.modules()))
         return first.in_features
-
-    @property
-    def history(self):
-        try:
-            return self._history
-        except:
-            self.reset_history()
-            return self._history
-
-    def reset_history(self):
-        try:
-            del self._history
-        except: pass
-        self._history = train_history(self)
     
     @property
     def valid_ds(self):
-        return self.train_dl.dataset
+        return self.valid_dl.dataset
 
     @property
     def train_ds(self):
-        return self.valid_dl.dataset
+        return self.train_dl.dataset
 
+    @property
+    def test_ds(self):
+        return self.test_dl.dataset
+
+    @property
+    def train_Xy(self):
+        for batch in self.train_dl:
+            yield [ t.to(self.model.device) for t in batch ]
+    
+    @property
+    def valid_Xy(self):
+        for batch in self.valid_dl:
+            yield [ t.to(self.model.device) for t in batch ]
+    
+    @property
+    def test_Xy(self):
+        for batch in self.test_dl:
+            yield [ t.to(self.model.device) for t in batch ]
+    
     @property
     def valid_tensors(self):
         return self.valid_dl.dataset.tensors
@@ -329,12 +360,16 @@ class trainer:
         return self.train_dl.dataset.tensors
 
     @property
+    def test_tensors(self):
+        return self.test_dl.dataset.tensors
+
+    @property
     def train_X(self):
         return self.train_tensors[0]
 
     @property
     def train_y(self):
-        return self.train_tensors[1]
+        return self.train_tensors[-1]
 
     @property
     def valid_X(self):
@@ -342,8 +377,16 @@ class trainer:
 
     @property
     def valid_y(self):
-        return self.valid_tensors[1]
+        return self.valid_tensors[-1]
 
+    @property
+    def test_X(self):
+        return self.test_tensors[0]
+
+    @property
+    def test_y(self):
+        return self.test_tensors[-1]
+    
     @property
     def model(self):
         try:
@@ -370,9 +413,9 @@ class trainer:
                 print(name, param.data)
 
     def predict(self, *X):
-        self.model.eval()
-        X = [ x.to(self.model.device) for x in X ]
-        return self.post_forward(self.model(*X))
+        with self.eval_mode:
+            X = [ x.to(self.model.device) for x in X ]
+            return self.post_forward(self.model(*X))
 
     def post_forward(self, y):
         return y
@@ -417,45 +460,70 @@ class trainer:
         else:
             print(f'commit point {label} not found')
 
-    def train_correct(self):
-        with ordered_dl(self.train_dl) as dl:
-            for i, t in enumerate(dl):
-                *X, y = [ a.to(self.model.device) for a in t ]
-                y_pred = self.predict(*X)
-                for ii, yy in zip(i, y == y_pred):
-                    print(ii, yy)
-
     def validate_loss(self, dl=None):
         if not dl:
-            dl = self.valid_dl
-        with torch.set_grad_enabled(False):
+            dl = self.valid_Xy
+        with self.eval_mode:
             losses = []
-            for t in dl:
-                *X, y = [ a.to(self.model.device) for a in t ]
-                losses.append((self.loss_xy(*X, y=y)[0].item(), len(y)))
+            for *X, y in dl:
+                losses.append((self.loss_xy(*X, y=y)[0].item() * len(y), len(y)))
             sums = [ sum(x) for x in zip(*losses) ]
             return sums[0] / sums[1]
 
-    def validate(self, pbar=None):
-        epoch = self.history.create_epoch('valid')
-        epoch.report = True
-        with torch.set_grad_enabled(False):
-            epoch.before_epoch()
-            for t in self.valid_dl:
-                *X, y = [ a.to(self.model.device) for a in t ]
-                epoch.before_batch(X, y)
+    @property
+    def eval_mode(self):
+        class CM(object):
+            def __init__(self, trainer):
+                self.trainer = trainer
+            def __enter__(self):
+                self.trainer.model.eval()
+                self.prev = torch.is_grad_enabled()
+                torch.set_grad_enabled(False)
+                return self.trainer.model
+            def __exit__(self, type, value, traceback):
+                torch.set_grad_enabled(self.prev)
+                self.trainer.model.train()
+        return CM(self)
+
+    @property
+    def train_mode(self):
+        class CM(object):
+            def __init__(self, trainer):
+                self.trainer = trainer
+            def __enter__(self):
+                self.trainer.model.train()
+                self.prev = torch.is_grad_enabled()
+                torch.set_grad_enabled(True)
+                return self.trainer.model
+            def __exit__(self, type, value, traceback):
+                torch.set_grad_enabled(self.prev)
+                self.trainer.model.eval()
+        return CM(self)
+
+    def validate(self, pbar=None, log={}):
+        epochloss = 0
+        n = 0
+        epoch_y_pred = []
+        epoch_y = []
+
+        with self.eval_mode:
+            for *X, y in self.valid_Xy:
                 loss, y_pred = self.loss_xy(*X, y=y)
-                epoch.after_batch( X, y, y_pred, loss )
+                epochloss += loss.item() * len(y_pred)
+                n += len(y_pred)
+                epoch_y_pred.append(to_numpy(y_pred))
+                epoch_y.append(to_numpy(y))
                 if pbar is not None:
                     pbar.update(self.valid_dl.batch_size)
-            epoch.after_epoch()
-        return epoch
-
+            epochloss /= n
+            epoch_y = np.concatenate(epoch_y, axis=0)
+            epoch_y_pred = np.concatenate(epoch_y_pred, axis=0)
+            self.evaluator._store(epoch_y, epoch_y_pred, loss=epochloss, phase='valid', epoch=self.epochid, **log)
+        return epochloss
+            
     def loss_xy(self, *X, y=None):
-        try:
-            y_pred = self.model(*X)
-        except:
-            y_pred = self.model(X)
+        assert y is not None, 'Call loss_xy with y=y'
+        y_pred = self.model(*X)
         return self.loss(y_pred, y), self.post_forward(y_pred)
 
     def train_batch(self, *X, y=None):
@@ -464,8 +532,16 @@ class trainer:
         loss.backward()
         self.optimizer.step()
         return loss, y_pred
+        
+    def _time(self):
+        try:
+            t = self._start_time
+        except:
+            t = timeit.default_timer()
+        self._start_time = timeit.default_timer()
+        return timeit.default_timer() - t
     
-    def train(self, epochs, lr=None, report_frequency=None, save=None, optimizer=None, weight_decay=None, momentum=None, save_lowest=None, save_highest=None):
+    def train(self, epochs, lr=None, report_frequency=None, save=None, optimizer=None, weight_decay=None, momentum=None, save_lowest=None, save_highest=None, log={}):
         if save:
             self.save = save
         if weight_decay is not None and self.weight_decay != weight_decay:
@@ -482,46 +558,61 @@ class trainer:
         if lr:
             self.change_lr(lr)
         model = self.model
-        model.train()
+        torch.set_grad_enabled(False)
         reports = math.ceil(epochs / report_frequency)
         maxepoch = self.epochid + epochs
         batches = len(self.train_dl) * self.train_dl.batch_size * epochs + len(self.valid_dl) * self.valid_dl.batch_size * reports
         pbar = tqdm(range(batches), desc='Total', leave=False)
+        self._time()
         for i in range(epochs):
             self.epochid += 1
+            epochloss = 0
+            n = 0
+            epoch_y_pred = []
+            epoch_y = []
+
             try:
                 del self._scheduler
             except: pass
             self.scheduler
-            epoch = self.history.create_epoch('train')
-            if self.log and (((i + 1) % report_frequency) == 0 or i == epochs - 1):
-                epoch.report = True
-            epoch.before_epoch()
-            for t in self.train_dl:
-                *X, y = [ a.to(self.model.device) for a in t ]
-                epoch.before_batch( X, y )
-                loss, y_pred = self.train_batch(*X, y=y)
-                self.scheduler.step()
-                try:
-                    y_pred = model.predict(y_pred)
-                except: pass
-                epoch.after_batch( X, y, y_pred, loss)
-                pbar.update(self.train_dl.batch_size)
-            epoch.after_epoch()
-            if epoch.report:
-                vepoch = self.validate(pbar = pbar)
-                self.history.register_epoch(epoch)
-                self.history.register_epoch(vepoch)
-                print(f'{self.epochid} {epoch.time():.2f}s {epoch} {vepoch}')
+            report = (((i + 1) % report_frequency) == 0 or i == epochs - 1)
+            with self.train_mode:
+                for *X, y in self.train_Xy:
+                    loss, y_pred = self.train_batch(*X, y=y)
+                    self.scheduler.step()
+                    try:
+                        # TODO naam aanpassen
+                        y_pred = model.post_forward(y_pred)
+                    except: pass
+                    if report:
+                        epochloss += loss.item() * len(y_pred)
+                        n += len(y_pred)
+                        epoch_y_pred.append(to_numpy(y_pred))
+                        epoch_y.append(to_numpy(y))
+
+                    pbar.update(self.train_dl.batch_size)
+            if report:
+                epochloss /= n
+                epoch_y = np.concatenate(epoch_y, axis=0)
+                epoch_y_pred = np.concatenate(epoch_y_pred, axis=0)
+                self.evaluator._store(epoch_y, epoch_y_pred, loss=epochloss, phase='train', epoch=self.epochid, **log)
+                validloss = self.validate(pbar = pbar, log=log)
+                metric = ''
+                v = self.evaluator.valid.iloc[-1]
+                for m in self.metrics:
+                    m = m.__name__
+                    value = v[m]
+                    metric += f'{m}={value:.5f} '
+                print(f'{self.epochid} {self._time():.2f}s trainloss={epochloss:.5f} validloss={validloss:.5f} {metric}')
                 if save is not None:
                     self.commit(f'{save}-{self.epochid}')
                 if save_lowest is not None:
-                    if self.lowest_score is None or vepoch[save_lowest] < self.lowest_score:
-                        self.lowest_score = vepoch[save_lowest]
+                    if self.lowest_score is None or validloss < self.lowest_score:
+                        self.lowest_score = validloss
                         self.commit('lowest')
                 if save_highest is not None:
-                    if self.highest_score is None or vepoch[save_highest] > self._highest_score:
-                        self.highest_score = vepoch[save_highest]
+                    if self.highest_score is None or validloss > self.highest_score:
+                        self.highest_score = validloss
                         self.commit('highest')
     
     def lowest(self):
@@ -530,6 +621,14 @@ class trainer:
     def highest(self):
         self.checkout('highest')
 
+    def learning_curve(self, y='loss', series='phase', select=None, xlabel = None, ylabel = None, title=None, **kwargs):
+        return self.evaluator.line_metric(x='epoch', series=series, select=select, y=y, xlabel = xlabel, ylabel = ylabel, title=title, **kwargs)
+        
+    def validation_curve(self, y=None, x='epoch', series='phase', select=None, xlabel = None, ylabel = None, title=None, **kwargs):
+        if y is not None and type(y) != str:
+            y = y.__name__
+        return self.evaluator.line_metric(x=x, series=series, select=select, y=y, xlabel = xlabel, ylabel = ylabel, title=title, **kwargs)
+        
     def tune(self, params,setter, lr=[1e-6, 1e-2], steps=40, smooth=0.05, label=None, **kwargs):
         lr_values = exprange(*lr, steps)
         if label is None:
@@ -542,10 +641,8 @@ class trainer:
     def tune_weight_decay(self, lr=[1e-6,1e-4], params=[1e-6, 1], steps=40, smooth=0.05, yscale='log', **kwargs):
         self.tune( params, partial(self.set_optimizer_param, 'weight_decay'), lr=lr, steps=steps, smooth=smooth, label='weight decay', yscale=yscale, **kwargs)
 
-    def lr_find(self, lr=[1e-6, 10], steps=100, smooth=0.05, **kwargs):
-        with tuner(self, exprange(lr[0], lr[1], steps), self.set_lr, label='lr', yscale='log', smooth=smooth) as t:
+    def lr_find(self, lr=[1e-6, 10], steps=40, smooth=0.05, **kwargs):
+        with tuner(self, exprange(lr[0], lr[1], steps), self.set_lr, label='lr', yscale='log', smooth=smooth, **kwargs) as t:
             t.run()
 
-    def plot(self, *metric, **kwargs):
-        self.history.plot(*metric, **kwargs)
         
