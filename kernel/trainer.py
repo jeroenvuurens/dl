@@ -26,16 +26,27 @@ except:
 
 def last_container(last):
     try:
-        children = list(last.children())
-    except: return None
-    for c in children[::-1]:
-        l = last_container(c)
+        l = last_container(last.children())
         if l is not None:
             return l
-        try:
-            if c.out_features > 0:
-                return c
-        except: pass
+    except: pass
+    try:
+        if len(last._modules) > 0 and next(reversed(last._modules.values())).out_features > 0:
+            return last
+    except: pass
+
+class DLModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def set_last_linear(self, out_features):
+        container = self.last_container()
+        name, last = container._modules.popitem()
+        container.add_module(name, nn.Linear(last.in_features, out_features))
+
+    def last_container(self):
+        return last_container(self)
+
 
 #def last_container(last):
 #    children = list(last.children())
@@ -628,7 +639,17 @@ class trainer:
         if y is not None and type(y) != str:
             y = y.__name__
         return self.evaluator.line_metric(x=x, series=series, select=select, y=y, xlabel = xlabel, ylabel = ylabel, title=title, **kwargs)
-        
+       
+    def freeze(self, last=-1):
+        for c in list(self.model.children())[:last]:
+            for p in c.parameters():
+                p.requires_grad=False
+
+    def unfreeze(self, last=-1):
+        for c in list(self.model.children())[:-1]:
+            for p in c.parameters():
+                p.requires_grad=True
+
     def tune(self, params,setter, lr=[1e-6, 1e-2], steps=40, smooth=0.05, label=None, **kwargs):
         lr_values = exprange(*lr, steps)
         if label is None:
@@ -641,8 +662,8 @@ class trainer:
     def tune_weight_decay(self, lr=[1e-6,1e-4], params=[1e-6, 1], steps=40, smooth=0.05, yscale='log', **kwargs):
         self.tune( params, partial(self.set_optimizer_param, 'weight_decay'), lr=lr, steps=steps, smooth=smooth, label='weight decay', yscale=yscale, **kwargs)
 
-    def lr_find(self, lr=[1e-6, 10], steps=40, smooth=0.05, **kwargs):
-        with tuner(self, exprange(lr[0], lr[1], steps), self.set_lr, label='lr', yscale='log', smooth=smooth, **kwargs) as t:
+    def lr_find(self, lr=[1e-6, 10], steps=40, smooth=0.05, cache_valid=True, **kwargs):
+        with tuner(self, exprange(lr[0], lr[1], steps), self.set_lr, label='lr', yscale='log', smooth=smooth, cache_valid=cache_valid, **kwargs) as t:
             t.run()
 
         

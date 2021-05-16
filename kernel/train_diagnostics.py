@@ -52,20 +52,23 @@ class tuner:
             self.train_iterator = iter(self.trainer.train_Xy)
             return next(self.train_iterator)
 
-    def run( self ):
+    def run( self, cache_valid=True ):
         graphx = []
         sloss = []
         validation_set = []
         mem_validation = 0
         self.trainer.model
         
-        #for batch in self.trainer.valid_Xy:
-        #    validation_set.append(batch)
-        #    mem_validation += sum([sys.getsizeof(x.storage()) for x in batch])
-        #    #print(mem_validation)
-        #    if self.max_validation_mem and mem_validation > self.max_validation_mem:
-        #        print('warning: validation set is too large for memory')
-        #        break
+        if cache_valid:
+            for batch in self.trainer.valid_Xy:
+                validation_set.append(batch)
+                mem_validation += sum([sys.getsizeof(x.storage()) for x in batch])
+                #print(mem_validation)
+                if self.max_validation_mem and mem_validation > self.max_validation_mem:
+                    print('warning: validation set is too large for memory')
+                    break
+        else:
+            validation_set = self.trainer.valid_Xy
         with plt_notebook():
             with Plot(xscale='log', xlabel=self.xlabel) as p:
                 with self.trainer.train_mode:
@@ -74,7 +77,7 @@ class tuner:
                         self.lrupdate(lr)
                         *X, y = self.next_train()
                         loss, pred_y = self.trainer.train_batch(*X, y=y)
-                        loss = self.trainer.validate_loss()
+                        loss = self.trainer.validate_loss(validation_set)
                         try:
                             loss = self.smooth * loss + (1 - self.smooth) * sloss[-1]
                         except: pass
